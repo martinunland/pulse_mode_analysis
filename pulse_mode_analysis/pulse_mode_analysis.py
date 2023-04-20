@@ -11,6 +11,7 @@ import logging
 from typing import List, Tuple
 from scipy.integrate import simps
 import numpy as np
+from scipy.signal import peak_widths
 
 log = logging.getLogger(__name__)
 INVALID_VALUE = -1
@@ -40,18 +41,19 @@ class PulseModeAnalysis:
         Args:
             data (np.ndarray): The waveform data.
             signal_mask (np.ndarray, optional): A boolean mask to select the signal region. If not given the whole waveform is integrated.
-            baseline_mask (np.ndarray, optional): A boolean mask to select the baseline region. If not given, no baseline correction is made.
 
         Returns:
             Tuple[Tuple[float, float], Tuple[float, float]]: A tuple containing the mean and error of the charge and the baseline.
         """
+        if not isinstance(data, np.ndarray):
+            data = np.array(data)
+
         if signal_mask is None:
-            signal_mask = np.ones(
-                data[0].size
+            signal_mask = np.ones(data[0].size).astype(
+                "int"
             )  # The entire waveform will be integrated
 
         baseline, baseline_error = self.get_baseline(data)
-
         charge = []
         for waveform in data:
             charge.append(
@@ -72,6 +74,9 @@ class PulseModeAnalysis:
             waveform (np.ndarray): The input waveform data.
         """
         log.debug("Updating/making time axis and baseline/signal masks...")
+        if not isinstance(waveform, np.ndarray):
+            waveform = np.array(waveform)
+
         self.time_axis = np.arange(0, waveform.size, 1) * self.sampling_interval
 
         self.baseline_mask = np.logical_and(
@@ -81,7 +86,9 @@ class PulseModeAnalysis:
         log.debug("Finished making time axis & masks!")
 
     def get_pulse_shape(
-        self, x: np.ndarray, y: np.ndarray
+        self,
+        y: np.ndarray,
+        x: np.ndarray = None,
     ) -> Tuple[float, float, float]:
         """
         Calculate the pulse shape parameters (Full Width at Half Maximum, Rise Time, and Fall Time).
@@ -95,42 +102,45 @@ class PulseModeAnalysis:
         """
 
         log.debug("Calculating pulse shape parameters")
+        if x is None:
+            x = self.time_axis
         if not isinstance(x, np.ndarray):
             raise TypeError("x must be a numpy array")
-        if not isinstance(y, np.ndarray):
-            raise TypeError("y must be a numpy array")
 
-        max_index, max_val, x_at_max = self.get_maximum_index_and_coordinates(x, y)
-        first_part = x <= x_at_max
-        second_part = x >= x_at_max
+        max_index = np.argmax(y)
+        max_val = y[max_index]
 
-        x1_ar, x2_ar = [], []
         limits = np.array([0.8, 0.5, 0.2])
+        x1_ar, x2_ar = [], []
+
+        first_part = y[:max_index][::-1]
+        second_part = y[max_index:]
+
         for limit in limits:
-            for idx, val in enumerate(y[first_part][::-1]):
+            for idx, val in enumerate(first_part):
                 if val < limit * max_val:
                     x1_ar.append(
                         np.interp(
                             limit * max_val,
-                            [val, y[first_part][::-1][idx - 1]],
-                            [x[first_part][::-1][idx], x[first_part][::-1][idx - 1]],
+                            [val, first_part[idx - 1]],
+                            [x[max_index - idx], x[max_index - idx + 1]],
                         )
                     )
                     break
-            for idx, val in enumerate(y[second_part]):
+            for idx, val in enumerate(second_part):
                 if val < limit * max_val:
                     x2_ar.append(
                         np.interp(
                             limit * max_val,
-                            [y[second_part][idx - 1], val],
-                            [x[second_part][::-1][idx - 1], x[second_part][::-1][idx]],
+                            [second_part[idx - 1], val],
+                            [x[max_index + idx - 1], x[max_index + idx]],
                         )
                     )
                     break
 
-        FWHM = x2_ar[1] - x1_ar[1]
-        RT = x1_ar[0] - x1_ar[2]
-        FT = x2_ar[2] - x2_ar[0]
+        FWHM = abs(x2_ar[1] - x1_ar[1])
+        RT = abs(x1_ar[2] - x1_ar[0])
+        FT = abs(x2_ar[2] - x2_ar[0])
 
         return FWHM, RT, FT
 
@@ -162,7 +172,9 @@ class PulseModeAnalysis:
             Tuple[int, float, float]: The index, value, and corresponding x value of the maximum point.
         """
         log.debug("Getting index max")
-        max_index = np.argmax(y)
+        max_val = np.amax(y)
+        max_indices = np.where(y == max_val)[0]
+        max_index = max_indices[len(max_indices) // 2]
         y_at_max = y[max_index]
         x_at_max = x[max_index]
         return max_index, y_at_max, x_at_max
@@ -208,7 +220,7 @@ class PulseModeAnalysis:
         pulse, pulse_time = self.extract_pulse_region(waveform, max_index)
 
         try:
-            FWHM, RT, FT = self.get_pulse_shape(pulse_time, pulse)
+            FWHM, RT, FT = self.get_pulse_shape(y=pulse, x=pulse_time)
         except Exception as _:
             FWHM, RT, FT = [INVALID_VALUE] * 3
             log.debug(
