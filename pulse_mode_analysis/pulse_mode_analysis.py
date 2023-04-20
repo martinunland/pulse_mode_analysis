@@ -33,7 +33,7 @@ class PulseModeAnalysis:
         self.baseline_tmin = baseline_tmin
         self.baseline_tmax = baseline_tmax
 
-    def get_simple_intensity(self, data, signal_mask=None, baseline_mask=None):
+    def get_simple_intensity(self, data, signal_mask=None):
         """
         Calculate a first aproximation of the PMT intensity and baseline of the waveform data.
 
@@ -50,11 +50,7 @@ class PulseModeAnalysis:
                 data[0].size
             )  # The entire waveform will be integrated
 
-        if baseline_mask is None:
-            baseline = 0
-            baseline_error = 0
-        else:
-            baseline, baseline_error = self.get_baseline(data, baseline_mask)
+        baseline, baseline_error = self.get_baseline(data, self.baseline_mask)
 
         charge = []
         for waveform in data:
@@ -138,15 +134,12 @@ class PulseModeAnalysis:
 
         return FWHM, RT, FT
 
-    def get_baseline(
-        self, waveformBlock: np.ndarray, mask: np.ndarray
-    ) -> Tuple[float, float]:
+    def get_baseline(self, waveformBlock: np.ndarray) -> Tuple[float, float]:
         """
         Calculate the mean baseline level and its error for a given data block.
 
         Args:
             waveformBlock (np.ndarray): The input waveform data block.
-            mask (np.ndarray): A boolean mask to select the baseline region.
 
         Returns:
             Tuple[float, float]: The mean baseline level and its error.
@@ -154,7 +147,7 @@ class PulseModeAnalysis:
         log.debug("Calculating mean baseline level of data block...")
         baselines = []
         for waveform in waveformBlock:
-            baselines.append(waveform[mask])
+            baselines.append(waveform[self.baseline_mask])
         return np.average(baselines), np.std(baselines) / np.sqrt(len(baselines) - 1)
 
     def get_max_index(self, x, y):
