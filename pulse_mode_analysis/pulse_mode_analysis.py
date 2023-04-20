@@ -100,7 +100,7 @@ class PulseModeAnalysis:
         if not isinstance(y, np.ndarray):
             raise TypeError("y must be a numpy array")
 
-        max_index, max_val, x_at_max = self.get_max_index(x, y)
+        max_index, max_val, x_at_max = self.get_maximum_index_and_coordinates(x, y)
         first_part = x <= x_at_max
         second_part = x >= x_at_max
 
@@ -150,7 +150,7 @@ class PulseModeAnalysis:
             baselines.append(waveform[self.baseline_mask])
         return np.average(baselines), np.std(baselines) / np.sqrt(len(baselines) - 1)
 
-    def get_max_index(self, x, y):
+    def get_maximum_index_and_coordinates(self, x, y):
         """
         Get the index of the maximum value in the y-axis data, the amplitude and x value of maximum.
 
@@ -163,9 +163,9 @@ class PulseModeAnalysis:
         """
         log.debug("Getting index max")
         max_index = np.argmax(y)
-        max_val = y[max_index]
+        y_at_max = y[max_index]
         x_at_max = x[max_index]
-        return max_index, max_val, x_at_max
+        return max_index, y_at_max, x_at_max
 
     def extract_pulse_region(self, waveform, max_index):
         """
@@ -187,6 +187,9 @@ class PulseModeAnalysis:
         pulse_time = self.time_axis[start_index:end_index]
         return pulse, pulse_time
 
+    def integrate_waveform_in_Wb(self, time, amplitude):
+        return simps(amplitude * 1e-3, time * 1e-9)
+
     def process_waveform(self, waveform) -> List:
         """
         Process the input waveform and extract the relevant parameters.
@@ -198,7 +201,8 @@ class PulseModeAnalysis:
             List: A list containing pedestal_charge, transit_time, charge, amplitude, FWHM, RT, and FT.
         """
         log.debug("Processing waveform")
-        max_index, amplitude, transit_time = self.get_max_index(
+
+        max_index, amplitude, transit_time = self.get_maximum_index_and_coordinates(
             self.time_axis, waveform
         )
         pulse, pulse_time = self.extract_pulse_region(waveform, max_index)
@@ -211,11 +215,10 @@ class PulseModeAnalysis:
                 "Calculating pulse shape parameters failed, passing default values"
             )
 
-        log.debug("Calculating charges")
-        charge = simps(pulse * 1e-3, pulse_time * 1e-9)
-        pedestal_charge = simps(
-            waveform[self.baseline_mask] * 1e-3,
-            self.time_axis[self.baseline_mask] * 1e-9,
+        charge = self.integrate_waveform_in_Wb(pulse_time, pulse)
+        pedestal_charge = self.integrate_waveform_in_Wb(
+            self.time_axis[self.baseline_mask], waveform[self.baseline_mask]
         )
+
         log.debug("Finished processing waveform")
         return pedestal_charge, transit_time, charge, amplitude, FWHM, RT, FT
