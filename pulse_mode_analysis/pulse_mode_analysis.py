@@ -50,7 +50,7 @@ class PulseModeAnalysis:
                 data[0].size
             )  # The entire waveform will be integrated
 
-        baseline, baseline_error = self.get_baseline(data, self.baseline_mask)
+        baseline, baseline_error = self.get_baseline(data)
 
         charge = []
         for waveform in data:
