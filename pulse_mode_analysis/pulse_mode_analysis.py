@@ -11,8 +11,8 @@ import logging
 from typing import List, Tuple
 from scipy.integrate import simps
 import numpy as np
-from scipy.signal import peak_widths
-
+from scipy import signal
+import matplotlib.pyplot as plt
 log = logging.getLogger(__name__)
 INVALID_VALUE = -1
 
@@ -78,7 +78,7 @@ class PulseModeAnalysis:
             waveform = np.array(waveform)
 
         self.time_axis = np.arange(0, waveform.size, 1) * self.sampling_interval
-
+        self.mid_index = int(waveform.size / 2)
         self.baseline_mask = np.logical_and(
             self.time_axis > self.baseline_tmin,
             self.time_axis < self.baseline_tmax,
@@ -200,9 +200,10 @@ class PulseModeAnalysis:
         return pulse, pulse_time
 
     def integrate_waveform_in_Wb(self, time, amplitude):
-        return simps(amplitude * 1e-3, time * 1e-9)
+        return simps(amplitude * 1e-3, time)
+        
 
-    def process_waveform(self, waveform) -> List:
+    def process_SPW(self, waveform) -> List:
         """
         Process the input waveform and extract the relevant parameters.
 
@@ -234,3 +235,45 @@ class PulseModeAnalysis:
 
         log.debug("Finished processing waveform")
         return pedestal_charge, transit_time, charge, amplitude, FWHM, RT, FT
+
+
+    def process_MPW(self, waveform, trigger, calculate_pulse_shape = False) -> List:
+        """
+        Process the input waveform assuming no o many pulses and extract the relevant parameters.
+
+        Args:
+            waveform (np.ndarray): The input waveform data.
+            trigger (np.ndarray): Amplitude level for pulse selection.
+        Returns:
+            List: A list containing pedestal_charge, transit_time, charge, amplitude, FWHM, RT, and FT.
+        """
+        log.debug("Processing waveform")
+
+        indexMax, properties = signal.find_peaks(x=waveform, height=trigger, distance= int(20e-9/self.sampling_interval))
+        log.debug(f"Number of peaks found: {len(indexMax)}")
+        transit_time = []
+        
+        charge = []
+        amplitude = []
+        shape = []
+
+        for index in indexMax:
+            pulse, pulse_time = self.extract_pulse_region(waveform, index)
+
+            if calculate_pulse_shape:
+                try:
+                    shape.append(self.get_pulse_shape(y=pulse, x=pulse_time))
+                except Exception as _:
+                    shape.append([INVALID_VALUE] * 3)
+                    log.debug(
+                        "Calculating pulse shape parameters failed, passing default values"
+                    )
+            charge.append(self.integrate_waveform_in_Wb(pulse_time, pulse))
+            transit_time.append(self.time_axis[index])
+            amplitude.append(waveform[index])
+            
+        pulse, pulse_time = self.extract_pulse_region(waveform, self.mid_index)
+        pedestal_charge = self.integrate_waveform_in_Wb(pulse_time, pulse)
+        
+        log.debug("Finished processing waveform")
+        return  pedestal_charge, np.average(waveform), transit_time, charge, amplitude, shape
